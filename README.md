@@ -179,6 +179,26 @@ valid substitute for the MID360 built-in IMU. Before accepting a navigation
 run, verify the isolated worker delivers approximately 10 Hz LiDAR and 200 Hz
 IMU; materially lower rates or repeated source-stamp gaps invalidate the run.
 
+### Go2 Nav2 Driver Inputs
+
+The Go2 Driver reuses the same lease-bound
+`phanthy.navigation.velocity_proposal.v1` contract on
+`/ubuntu/navigation/nav2/velocity_proposal`. The subscription and execution
+queue are both latest-only. Valid velocities are forwarded to
+`SportClient.Move` in m/s and rad/s; terminal or expired proposals use
+`StopMove` and require a fresh zero `loco/state` sample before the lease is
+released or held for recovery. Direct `loco`, gait, gesture, or acrobatics
+actions revoke Nav2 authority and require a confirmed stop before issuing their
+RPC.
+
+The read-only `navigation_lidar` and `navigation_imu` cards convert Go2's
+native `rt/utlidar/cloud` and `rt/utlidar/imu` DDS streams into the
+same standard `/ubuntu/navigation/lidar` `PointCloud2` and
+`/ubuntu/navigation/imu` `Imu` contracts. Go2 uses the configured identity
+mounting rotation; the isolated worker, source-clock normalization, fail-closed
+readiness checks, and shared card lifecycle match the G1 navigation sensor
+path.
+
 ### G1 Self-Describing Camera Frames
 
 The RealSense plugin keeps the legacy `/ubuntu/camera/rgb` compressed image,
