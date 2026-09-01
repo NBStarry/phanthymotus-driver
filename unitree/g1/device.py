@@ -354,6 +354,7 @@ class _SpeakerNode(Node):
         self._pause_event = threading.Event()
         self._pause_event.set()  # 初始为非暂停状态
         self._muted = False  # interrupt 后静默，丢弃后续 chunks 直到新 utterance
+        self._utterance_open = False
         # Clear stale PlayStream session from previous container run (MCU keeps state across reboot)
         self._client.PlayStop(APP_NAME)
         self.get_logger().info("SpeakerNode ready")
@@ -368,6 +369,7 @@ class _SpeakerNode(Node):
             self.stop_play()
         self._topic = topic
         self._muted = False  # 新 start 时清除静默
+        self._utterance_open = False
         self.get_logger().info(f"[speaker] creating subscription: topic={topic}, msg_type=AudioChunk, qos=LOW_LAT")
         self._sub = self.create_subscription(
             AudioChunk, topic, self._on_chunk, _LOW_LAT_QOS,
@@ -398,6 +400,8 @@ class _SpeakerNode(Node):
             except queue.Empty:
                 break
         self._pending_bytes = 0
+        self._muted = False
+        self._utterance_open = False
         try:
             self._client.PlayStop(APP_NAME)
         except Exception as e:
@@ -408,6 +412,7 @@ class _SpeakerNode(Node):
     def interrupt(self) -> dict:
         """立即中止播放：清空 buffer，停止 SDK，保持 subscription。"""
         with self._lock:
+            mute_until_eof = self._utterance_open
             self._interrupt_flag.set()
             # 清空 buffer
             while not self._buf.empty():
@@ -428,10 +433,11 @@ class _SpeakerNode(Node):
             self._interrupt_flag.clear()
             self._pause_event.set()
             self._draining.clear()
-            self._muted = True  # 静默：丢弃后续 TTS chunks 直到新 utterance
+            self._muted = mute_until_eof
             self.state = "ready"
-        self.get_logger().info("[speaker] interrupted — buffer cleared, muted until new utterance")
-        return {"state": "ready", "action": "interrupted"}
+        self.get_logger().info(
+            f"[speaker] interrupted — buffer cleared, muted={mute_until_eof}")
+        return {"state": "ready", "action": "interrupted", "muted": mute_until_eof}
 
     def pause(self) -> dict:
         """暂停播放：停止 SDK，保留 buffer 中未播放的内容。"""
@@ -471,6 +477,7 @@ class _SpeakerNode(Node):
 
         # 检测 EOF magic：utterance 结束标记
         if len(pcm) == 8 and pcm == self.AUDIO_EOF_MAGIC:
+            self._utterance_open = False
             if self._muted:
                 self._muted = False
                 self.get_logger().info("[speaker] unmuted — received EOF marker")
@@ -489,6 +496,7 @@ class _SpeakerNode(Node):
             self._last_chunk_time = now
             return  # 丢弃，等 EOF 到达
 
+        self._utterance_open = True
         self._buf.put(pcm)
         # 只统计「等待 drain 启动」期间攒下的字节。drain 运行时这些 chunk 是被
         # 消耗掉的，计入就会让计数器一路涨到整句大小 —— 等 drain 因
@@ -632,7 +640,7 @@ class SpeakerPlugin:
                 "properties": {
                     "action": {
                         "type": "string",
-                        "enum": ["start", "stop", "info"],
+                        "enum": ["start", "stop", "info", "interrupt"],
                         "description": "Action to perform",
                     },
                     "input_topic": {
@@ -641,6 +649,9 @@ class SpeakerPlugin:
                     },
                 },
                 "required": ["action"],
+                "x-hooks": {
+                    "on_kws_interrupt": {"action": "interrupt"},
+                },
             },
             "topic_in": [{"format": "audio/pcm-16k"}],
         }
@@ -696,6 +707,8 @@ class SpeakerPlugin:
         elif action == "stop":
             self._node.stop_play()
             return {"state": "idle"}
+        elif action == "interrupt":
+            return self._node.interrupt()
         elif action == "info":
             return {
                 "state": self._node.state,
@@ -890,7 +903,7 @@ class SpeakerIsolatedProxy:
                 "properties": {
                     "action": {
                         "type": "string",
-                        "enum": ["start", "stop", "info"],
+                        "enum": ["start", "stop", "info", "interrupt"],
                         "description": "Action to perform",
                     },
                     "input_topic": {
@@ -899,6 +912,9 @@ class SpeakerIsolatedProxy:
                     },
                 },
                 "required": ["action"],
+                "x-hooks": {
+                    "on_kws_interrupt": {"action": "interrupt"},
+                },
             },
             "topic_in": [{"format": "audio/pcm-16k"}],
         }

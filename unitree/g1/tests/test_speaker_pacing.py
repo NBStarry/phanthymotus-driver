@@ -393,6 +393,30 @@ class TestPacing(SpeakerTestBase):
                          "played a block after interrupt")
 
 
+# ── KWS interruption contract ───────────────────────────────────────────────
+
+class TestKwsInterrupt(SpeakerTestBase):
+
+    def test_both_speaker_modes_expose_the_interrupt_hook(self):
+        for plugin_type in (self.MODULE.SpeakerPlugin,
+                            self.MODULE.SpeakerIsolatedProxy):
+            plugin = object.__new__(plugin_type)
+            schema = plugin.get_tool()["inputSchema"]
+            self.assertIn("interrupt", schema["properties"]["action"]["enum"])
+            self.assertEqual(
+                schema["x-hooks"]["on_kws_interrupt"],
+                {"action": "interrupt"},
+            )
+
+    def test_idle_interrupt_does_not_mute_the_next_utterance(self):
+        node = self.new_node()
+        self.assertFalse(node.interrupt()["muted"])
+        node._on_chunk(chunk(3200))
+        self.assertTrue(node.interrupt()["muted"])
+        node._on_chunk(eof_msg(node))
+        self.assertFalse(node._muted)
+
+
 # ── R1 parity ───────────────────────────────────────────────────────────────
 
 class TestR1Parity(unittest.TestCase):
