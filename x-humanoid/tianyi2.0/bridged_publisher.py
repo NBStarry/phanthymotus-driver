@@ -37,11 +37,13 @@ class BridgedPublisher:
     SOCKET_DIR = "/tmp/tianyi_bridge"
     MAIN_SOCKET = "bridge_main.sock"
 
-    def __init__(self, node: Node, msg_type: Type, topic: str, qos: QoSProfile):
+    def __init__(self, node: Node, msg_type: Type, topic: str, qos: QoSProfile, *, bounded_frame=False):
         self.node = node
         self.msg_type = msg_type
         self.topic = topic
         self.qos = qos
+        # Opt-in: legacy streams keep their current transport/QoS behavior.
+        self._bounded_frame = bounded_frame
         self._socket = None
         self._connected = False
         self._msg_count = 0
@@ -74,6 +76,8 @@ class BridgedPublisher:
                     return False
 
                 self._socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                if self._bounded_frame:
+                    self._socket.settimeout(0.5)
                 self._socket.connect(self.socket_path)
 
                 # Send topic metadata on first connect
@@ -89,12 +93,15 @@ class BridgedPublisher:
                     # Fallback
                     msg_type_str = f"{self.msg_type.__module__}/{self.msg_type.__name__}"
 
-                print(f"[bridged_pub] {self.topic}: msg_type={self.msg_type}, module={self.msg_type.__module__}, formatted={msg_type_str}", flush=True)
+                if not self._bounded_frame:
+                    print(f"[bridged_pub] {self.topic}: msg_type={self.msg_type}, module={self.msg_type.__module__}, formatted={msg_type_str}", flush=True)
 
                 metadata = {
                     "topic": self.topic,
                     "msg_type": msg_type_str,
                 }
+                if self._bounded_frame:
+                    metadata["qos_profile"] = "reliable_latest"
                 import json
                 metadata_bytes = json.dumps(metadata).encode("utf-8")
                 self._socket.sendall(struct.pack("<I", len(metadata_bytes)))
@@ -102,11 +109,13 @@ class BridgedPublisher:
 
                 # Only mark connected after metadata is successfully sent
                 self._connected = True
-                print(f"[bridged_pub] {self.topic}: connected and metadata sent", flush=True)
+                if not self._bounded_frame:
+                    print(f"[bridged_pub] {self.topic}: connected and metadata sent", flush=True)
 
                 return True
             except Exception as e:
-                print(f"[bridged_pub] {self.topic}: connection failed: {e}", flush=True)
+                if not self._bounded_frame:
+                    print(f"[bridged_pub] {self.topic}: connection failed: {e}", flush=True)
                 if self._socket:
                     self._socket.close()
                     self._socket = None
@@ -123,6 +132,8 @@ class BridgedPublisher:
                     print(f"[bridged_pub] WARNING: bridge not available for {self.topic}, "
                           f"messages will be dropped", flush=True)
                 self._msg_count += 1
+                if self._bounded_frame:
+                    raise ConnectionError("camera frame bridge unavailable")
                 return
 
         try:
@@ -147,7 +158,10 @@ class BridgedPublisher:
             if self._socket:
                 self._socket.close()
                 self._socket = None
-            print(f"[bridged_pub] connection lost for {self.topic}, will retry", flush=True)
+            if not self._bounded_frame:
+                print(f"[bridged_pub] connection lost for {self.topic}, will retry", flush=True)
+            if self._bounded_frame:
+                raise ConnectionError("camera frame bridge send failed") from None
 
     def destroy(self) -> None:
         """Cleanup (same interface as rclpy.Publisher)."""

@@ -56,12 +56,15 @@ BEST_EFFORT_QOS = QoSProfile(
 class TopicHandler:
     """Handles a single topic: receives from socket, publishes to domain 42."""
 
-    def __init__(self, topic: str, msg_type_name: str, ctx: Context, executor):
+    def __init__(self, topic: str, msg_type_name: str, ctx: Context, executor, qos_profile=None):
         self.topic = topic
         self.msg_type_name = msg_type_name
         self.msg_class = get_message(msg_type_name)
         self.msg_count = 0
         self.context_invalid = False
+        if qos_profile not in (None, "reliable_latest"):
+            raise ValueError("unsupported bridge QoS profile")
+        self.qos_profile = qos_profile
 
         # Create publisher on domain 42
         self.node = Node(
@@ -72,6 +75,10 @@ class TopicHandler:
         # Use BEST_EFFORT for all topics to match Agent Core's expectations
         # Agent Core's phanthy_bus_bridge subscribes with BEST_EFFORT
         qos = BEST_EFFORT_QOS
+        if qos_profile == "reliable_latest":
+            qos = QoSProfile(reliability=ReliabilityPolicy.RELIABLE,
+                             history=HistoryPolicy.KEEP_LAST, depth=1,
+                             durability=DurabilityPolicy.VOLATILE)
 
         self.pub = self.node.create_publisher(self.msg_class, topic, qos)
         executor.add_node(self.node)
@@ -157,6 +164,9 @@ class SocketBridgeServer:
 
             topic = metadata["topic"]
             msg_type = metadata["msg_type"]
+            qos_profile = metadata.get("qos_profile")
+            if qos_profile not in (None, "reliable_latest"):
+                raise ValueError("unsupported bridge QoS profile")
 
             print(f"[socket-bridge] new client: {topic} ({msg_type})", flush=True)
 
@@ -172,9 +182,11 @@ class SocketBridgeServer:
                     except Exception as e:
                         print(f"[socket-bridge] cleanup error for {topic}: {e}", flush=True)
 
-                self.handlers[topic] = TopicHandler(topic, msg_type, self.ctx, self.executor)
+                self.handlers[topic] = TopicHandler(topic, msg_type, self.ctx, self.executor, qos_profile)
 
             handler = self.handlers[topic]
+            if handler.msg_type_name != msg_type or handler.qos_profile != qos_profile:
+                raise ValueError("bridge topic type/QoS conflict")
 
             # Receive and publish messages
             while not self._stop_flag.is_set():

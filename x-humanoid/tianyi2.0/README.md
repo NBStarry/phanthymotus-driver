@@ -115,6 +115,31 @@ result, and protocol-level `isError: true`.
 | `reset` | speed 30°/s | speed 5–60°/s |
 | `stop` | no parameters | no parameters |
 
+## 二维导航传感器（默认关闭，尚未真机验收）
+
+`navigation_lidar_2d` 和 `navigation_odom` 提供标准 LaserScan、Odometry/TF，
+供 PlanarSemanticNavigation 使用；不运行厂商导航，不更改旧 `laser_scan`、
+`nav`、`chassis_raw`。`loco`、独立停车守护和 execution_status **尚未实现**，
+本切片不能开启自主运动。具体配置、测试与阻断项见
+[NAVIGATION_READINESS.md](NAVIGATION_READINESS.md#二维传感器本地实现2026-09-14)。
+
+算法输入是标准 ROS 消息；`/<namespace>/navigation/{scan,odom}/status` 是
+String/data-json 诊断输出，不是算法输入，也不是停车反馈。现有 Dashboard
+按 format 推断 String 的旧桥可能不能显示标准消息；原始几何在 RViz 验证，
+不能将 ROS 收发测试宣称为 Canvas 验收。此改动不修改 Core renderer。
+
+## 二维导航接入：准入核实中，尚不可执行
+
+PlanarSemanticNavigation 的接口、只读探针、SDK 核实结果和阻塞项见
+[二维导航准入说明](NAVIGATION_READINESS.md)。本阶段不注册新导航工具，
+不改变现有 `nav`、`chassis_raw`、`laser_scan` 的行为，也不发布伪造时间戳的
+LaserScan/Odometry。新运动入口采用 `loco`；当前天轶实现尚没有该工具。
+
+新增可选 `camera_rgb_frame`，复用现有 Orbbec Image/CameraInfo，输出 JPEG/PSE1
+自描述帧。默认关闭，不改变 `camera_head`。合法 ROS topic 默认是
+`/<namespace>/camera/rgb_frame`（下划线，不能使用 `rgb-frame`）。配置、时间与
+标定限制、验证方式见上述准入说明；本地测试通过不代表真机时间对齐已验收。
+
 ## Arm gesture card
 
 `arm_gesture` provides semantic arm motions on top of the existing joint-level

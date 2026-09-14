@@ -423,6 +423,14 @@ class TianyiDeviceBundle:
         self._plugins: list = []
         plugins_cfg = cfg.get("plugins", {})
 
+        for sensor_name in ("navigation_lidar_2d", "navigation_odom"):
+            if plugins_cfg.get(sensor_name, {}).get("enabled", False):
+                from navigation_sensors import NavigationSensorPlugin
+                sensor_cfg = dict(plugins_cfg[sensor_name])
+                if sensor_name == "navigation_odom":
+                    sensor_cfg.setdefault("base_url", cfg.get("slamtec", {}).get("base_url", ""))
+                self._plugins.append(NavigationSensorPlugin(sensor_name, sensor_cfg, namespace))
+
         if plugins_cfg.get("state", {}).get("enabled", False):
             from device import StatePlugin
             state_cfg = dict(plugins_cfg["state"])
@@ -435,6 +443,11 @@ class TianyiDeviceBundle:
             from device import CameraPlugin
             self._plugins.append(CameraPlugin(plugins_cfg["camera"], namespace, ros2))
             print("[bundle] CameraPlugin loaded")
+
+        if plugins_cfg.get("camera_rgb_frame", {}).get("enabled", False):
+            from camera_rgb_frame import CameraRgbFramePlugin
+            self._plugins.append(CameraRgbFramePlugin(plugins_cfg["camera_rgb_frame"], namespace, ros2))
+            print("[bundle] CameraRgbFramePlugin loaded")
 
         if plugins_cfg.get("camera_snapshot", {}).get("enabled", False):
             from device import CameraSnapshotPlugin
@@ -603,7 +616,10 @@ class TianyiDeviceBundle:
     def stop_all(self) -> None:
         for p in self._plugins:
             try:
-                p.stop()
+                if hasattr(p, "close"):
+                    p.close()
+                else:
+                    p.stop()
             except Exception:
                 pass
         print("[bundle] All plugins stopped")

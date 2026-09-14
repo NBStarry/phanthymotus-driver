@@ -25,10 +25,43 @@ slamtec:
   base_url: "http://192.168.11.1:1448"
 
 plugins:
+  navigation_lidar_2d:
+    enabled: false
+    source_clock_domain: unverified
+    axes_verified: false
+    sdk_reader_path: ""
+    sdk_host: ""
+    sdk_port: 1445
+    # Fill from verified device specification/calibration, never guessed values.
+    range_min_m: null
+    range_max_m: null
+    angle_increment_rad: null
+    base_to_laser: null
+    max_age_sec: 0.5
+  navigation_odom:
+    enabled: false
+    odom_time_mode: source  # Explicitly select poll_estimate for limited integration.
+    actual_speed_verified: false
+    local_odom_verified: false
+    poll_hz: 20
+    request_timeout_sec: 0.1
+    max_age_sec: 0.5
+    max_pose_jump_m: 0.5
+    max_yaw_jump_rad: 0.5
+    covariance_source: ""
+    pose_variance: null
+    twist_variance: null
   state:
     enabled: true
   camera:
     enabled: true
+  camera_rgb_frame:
+    enabled: false
+    # Only set ros_system_time after verifying the Orbbec source clock.
+    source_clock_domain: unverified
+    image_topic: /ob_camera_head/color/image_raw
+    camera_info_topic: /ob_camera_head/color/camera_info
+    max_age_sec: 0.5
   camera_snapshot:
     enabled: true
     output_dir: "/opt/phanthy-motus/data/images"
